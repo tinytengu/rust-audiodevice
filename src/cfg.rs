@@ -2,8 +2,8 @@
 
 use std::fmt;
 use std::fs;
-use std::io::{Read, Write};
-use std::path::PathBuf;
+use std::io::{self, Read, Write};
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 pub struct ConfigDevice {
@@ -17,28 +17,28 @@ impl ConfigDevice {
     }
 
     pub fn from(buf: &str) -> ConfigDevice {
-        let is_active = buf.chars().nth(0).unwrap() == '*';
-        let name = (&buf[(is_active as usize)..]).to_string();
+        let is_active = buf.chars().nth(0).unwrap_or(' ') == '*';
 
-        ConfigDevice { name, is_active }
+        ConfigDevice {
+            name: (&buf[(is_active as usize)..]).to_string(),
+            is_active,
+        }
     }
 
     pub fn toggle(&mut self) {
         self.is_active = !self.is_active;
 
-        if !self.is_active {
-            return;
+        if self.is_active {
+            Command::new("nircmd")
+                .args(["setdefaultsounddevice", self.name.as_str()])
+                .output()
+                .unwrap();
         }
-
-        Command::new("nircmd")
-            .args(["setdefaultsounddevice", self.name.as_str()])
-            .output()
-            .expect("Unable to execute nircmd command");
     }
 }
 
 impl fmt::Display for ConfigDevice {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}{}", if self.is_active { "*" } else { "" }, self.name)
     }
 }
@@ -55,23 +55,19 @@ impl Config {
     pub fn from(buf: &str) -> Config {
         let lines: Vec<&str> = buf.split('\n').map(|i| i.trim()).collect();
         Config {
-            devices: lines.iter().map(|i| ConfigDevice::from(i)).collect(),
+            devices: lines.iter().map(|l| ConfigDevice::from(l)).collect(),
         }
     }
 
-    pub fn read(path: &PathBuf) -> Config {
-        let mut file = fs::File::open(path).expect("Unable to open config file");
+    pub fn read(path: &Path) -> io::Result<Config> {
+        let mut file = fs::File::open(path)?;
         let mut buf: String = String::new();
-        file.read_to_string(&mut buf).unwrap();
-        Config::from(&buf)
+        file.read_to_string(&mut buf)?;
+        Ok(Config::from(&buf))
     }
 
-    pub fn write(&self, path: &PathBuf) {
-        let mut file = fs::File::options()
-            .truncate(true)
-            .write(true)
-            .open(path)
-            .unwrap();
+    pub fn write(&self, path: &PathBuf) -> io::Result<()> {
+        let mut file = fs::File::options().truncate(true).write(true).open(path)?;
 
         write!(
             file,
@@ -83,6 +79,8 @@ impl Config {
                 .join("\n")
         )
         .unwrap();
+
+        Ok(())
     }
 }
 
